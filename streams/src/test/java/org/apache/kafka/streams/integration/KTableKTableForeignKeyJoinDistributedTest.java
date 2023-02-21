@@ -34,7 +34,6 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.ThreadMetadata;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.errors.DefaultProductionExceptionHandler;
-import org.apache.kafka.streams.errors.LogAndContinueExceptionHandler;
 import org.apache.kafka.streams.integration.utils.IntegrationTestUtils;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KTable;
@@ -168,8 +167,6 @@ public class KTableKTableForeignKeyJoinDistributedTest {
         final String safeTestName = safeUniqueTestName(getClass(), testInfo);
 
         final Properties streamsConfiguration = new Properties();
-
-//        streamsConfiguration.put(StreamsConfig.APPLICATION_SERVER_CONFIG, "${System.getenv("POD_IP")}:$APP_SERVER_CONFIG_PORT")
         streamsConfiguration.put(StreamsConfig.APPLICATION_ID_CONFIG, "app-" + safeTestName);
         streamsConfiguration.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
         streamsConfiguration.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -177,10 +174,10 @@ public class KTableKTableForeignKeyJoinDistributedTest {
         streamsConfiguration.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 50);
         streamsConfiguration.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 700);
         streamsConfiguration.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, 1048576);
-        streamsConfiguration.put(
-                StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
-                LogAndContinueExceptionHandler.class.getCanonicalName()
-        );
+//        streamsConfiguration.put(
+//                StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
+//                LogAndContinueExceptionHandler.class.getCanonicalName()
+//        );
         streamsConfiguration.put(
                 StreamsConfig.DEFAULT_PRODUCTION_EXCEPTION_HANDLER_CLASS_CONFIG,
                 DefaultProductionExceptionHandler.class.getCanonicalName()
@@ -188,23 +185,14 @@ public class KTableKTableForeignKeyJoinDistributedTest {
         streamsConfiguration.put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, "10");
         streamsConfiguration.put(ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG, "true");
         streamsConfiguration.put(StreamsConfig.REPLICATION_FACTOR_CONFIG, "1");
-        streamsConfiguration.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.AT_LEAST_ONCE);
+//        streamsConfiguration.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.AT_LEAST_ONCE);
         streamsConfiguration.put(StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG, 0);
         streamsConfiguration.put(StreamsConfig.MAX_WARMUP_REPLICAS_CONFIG, 1);
-//        streamsConfiguration.put(StatefulSetMemoryRocksDBConfig:: class.java.canonicalName ?.let {
-//            StreamsConfig.ROCKSDB_CONFIG_SETTER_CLASS_CONFIG, it
-//        })
-//        streamsConfiguration.put(StreamsConfig.STATE_DIR_CONFIG, stateDir);
-//        streamsConfiguration.put(System.getenv("HOSTNAME") ?.let { ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, it })
         streamsConfiguration.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 1_000);
         streamsConfiguration.put(StreamsConfig.restoreConsumerPrefix(ConsumerConfig.MAX_POLL_RECORDS_CONFIG), 20000);
-        // null?.let { StreamsConfig.restoreConsumerPrefix(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG), it.toString() });
-        streamsConfiguration.put(StreamsConfig.STATE_CLEANUP_DELAY_MS_CONFIG, 3_600_000);
-        streamsConfiguration.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30_000);
+//        streamsConfiguration.put(StreamsConfig.STATE_CLEANUP_DELAY_MS_CONFIG, 3_600_000);
+//        streamsConfiguration.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30_000);
         streamsConfiguration.put(StreamsConfig.producerPrefix(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG), 1_000);
-        // null?.let<Int, Pair<String, String>> { StreamsConfig.ACCEPTABLE_RECOVERY_LAG_CONFIG, it.toString() });
-        // null?.let<ProducerCompressionType, Pair<String, String>> { ProducerConfig.COMPRESSION_TYPE_CONFIG, it.value });
-        // null?.let<Int, Pair<String, String>> { StreamsConfig.PROBING_REBALANCE_INTERVAL_MS_CONFIG, it.toString() });
         streamsConfiguration.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 999);
         return streamsConfiguration;
     }
