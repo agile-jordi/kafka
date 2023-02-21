@@ -856,9 +856,9 @@ public class IntegrationTestUtils {
                 final TestCondition valuesRead = () -> {
                     final List<T> readData;
                     if (withTimestamp) {
-                        readData = (List<T>) readKeyValuesWithTimestamp(topic, consumer, Math.max(500, waitTime / 10), expectedRecords.size());
+                        readData = (List<T>) readKeyValuesWithTimestamp(topic, consumer, Math.max(1000, waitTime / 20), expectedRecords.size());
                     } else {
-                        readData = (List<T>) readKeyValues(topic, consumer, Math.max(500, waitTime / 10), expectedRecords.size());
+                        readData = (List<T>) readKeyValues(topic, consumer, Math.max(1000, waitTime / 20), expectedRecords.size());
                     }
                     accumData.addAll(readData);
 
@@ -876,17 +876,19 @@ public class IntegrationTestUtils {
                     System.out.println("App consumer group offsets (" + consumerGroup + "): " +
                             offsetsByTopic.entrySet().stream().sorted(Entry.comparingByKey()).map(e -> "  " + (e.getKey().startsWith(consumerGroup) ? e.getKey().substring(consumerGroup.length() + 1) : e.getKey()) + ": " + e.getValue()).collect(Collectors.joining("\n", "\n", ""))
                     );
-                    final Long totalOffset = offsetsByTopic.values().stream().reduce(0L, Long::sum);
-                    System.out.println("Waiting for condition... " + diffs.missingKeys.size() + " missing, " + diffs.unexpectedKeys.size() + " unexpected," + diffs.mismatchedValues.size() + " mismatched." +
+                    final Long totalLag = offsetsByTopic.values().stream().reduce(0L, Long::sum) + (4 - offsetsByTopic.size()) * 1000000;
+
+                    System.out.println("Waiting for condition... " + totalLag + " lag, " + diffs.missingKeys.size() + " missing, " + diffs.unexpectedKeys.size() + " unexpected, " + diffs.mismatchedValues.size() + " mismatched." +
                             (diffs.missingKeys.isEmpty() ? "" : "\n  Missing (first 20): " + diffs.missingKeys.stream().sorted().limit(20).map(k -> k.toString()).collect(Collectors.joining(", "))) +
                             (diffs.unexpectedKeys.isEmpty() ? "" : "\n  Unexpected (first 20): " + diffs.unexpectedKeys.stream().sorted().limit(20).map(k -> k.toString()).collect(Collectors.joining(", "))) +
                             (diffs.mismatchedValues.isEmpty() ? "" : "\n  Mismatched values (first 20): " + diffs.mismatchedValues.stream().sorted().limit(20).map(k -> k.toString()).collect(Collectors.joining(", "))) +
+                            (totalLag > 0 ? "\n  Offset: " + offsetsByTopic.entrySet().stream().sorted(Entry.comparingByKey()).filter(e -> e.getValue() > 0).map(e -> e.getKey() + ": " + e.getValue()).collect(Collectors.joining(", ")) : "") +
                             ""
                     );
                     // returns true only if the remaining records in both lists are the same and in the same order
                     // and the last record received matches the last expected record
 //                return finalAccumData.equals(finalExpected);
-                    return totalOffset == 0L && diffs.isEmpty();
+                    return totalLag == 0L && diffs.isEmpty();
 
                 };
                 TestUtils.waitForCondition(
