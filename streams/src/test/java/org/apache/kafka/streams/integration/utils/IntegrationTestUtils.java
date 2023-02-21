@@ -19,12 +19,16 @@ package org.apache.kafka.streams.integration.utils;
 import kafka.server.KafkaServer;
 import kafka.server.MetadataCache;
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
+import org.apache.kafka.clients.admin.ConsumerGroupListing;
+import org.apache.kafka.clients.admin.KafkaAdminClient;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -73,6 +77,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -94,6 +99,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.singletonList;
 import static org.apache.kafka.common.utils.Utils.sleep;
 import static org.apache.kafka.test.TestUtils.retryOnExceptionWithTimeout;
 import static org.apache.kafka.test.TestUtils.waitForCondition;
@@ -102,7 +108,22 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.fail;
-import static java.util.Collections.singletonList;
+
+class Diffs<K, V> {
+    final Set<K> missingKeys;
+    final Set<K> unexpectedKeys;
+    final Set<K> mismatchedValues;
+
+    public Diffs(final Set<K> missingKeys, final Set<K> unexpectedKeys, final Set<K> mismatchedValues) {
+        this.missingKeys = missingKeys;
+        this.unexpectedKeys = unexpectedKeys;
+        this.mismatchedValues = mismatchedValues;
+    }
+
+    public boolean isEmpty() {
+        return missingKeys.isEmpty() && unexpectedKeys.isEmpty() && mismatchedValues.isEmpty();
+    }
+}
 
 /**
  * Utility functions to make integration testing more convenient.
@@ -122,9 +143,9 @@ public class IntegrationTestUtils {
      * expected response position.
      */
     public static <R> StateQueryResult<R> iqv2WaitForPartitions(
-        final KafkaStreams kafkaStreams,
-        final StateQueryRequest<R> request,
-        final Set<Integer> partitions) {
+            final KafkaStreams kafkaStreams,
+            final StateQueryRequest<R> request,
+            final Set<Integer> partitions) {
 
         final long start = System.currentTimeMillis();
         final long deadline = start + DEFAULT_TIMEOUT;
@@ -153,8 +174,8 @@ public class IntegrationTestUtils {
      * expected response position.
      */
     public static <R> StateQueryResult<R> iqv2WaitForResult(
-        final KafkaStreams kafkaStreams,
-        final StateQueryRequest<R> request) {
+            final KafkaStreams kafkaStreams,
+            final StateQueryRequest<R> request) {
 
         final long start = System.currentTimeMillis();
         final long deadline = start + DEFAULT_TIMEOUT;
@@ -172,8 +193,8 @@ public class IntegrationTestUtils {
                 sleep(100L);
             } else {
                 final boolean needToWait = allResults
-                    .stream()
-                    .anyMatch(IntegrationTestUtils::needToWait);
+                        .stream()
+                        .anyMatch(IntegrationTestUtils::needToWait);
                 if (needToWait) {
                     sleep(100L);
                 } else {
@@ -183,15 +204,15 @@ public class IntegrationTestUtils {
         } while (System.currentTimeMillis() < deadline);
 
         throw new TimeoutException(
-            "The query never returned within the bound. Last result: "
-            + result
+                "The query never returned within the bound. Last result: "
+                        + result
         );
     }
 
     private static <R> LinkedList<QueryResult<R>> getAllResults(
-        final StateQueryResult<R> result) {
+            final StateQueryResult<R> result) {
         final LinkedList<QueryResult<R>> allResults =
-            new LinkedList<>(result.getPartitionResults().values());
+                new LinkedList<>(result.getPartitionResults().values());
         if (result.getGlobalResult() != null) {
             allResults.add(result.getGlobalResult());
         }
@@ -200,9 +221,9 @@ public class IntegrationTestUtils {
 
     private static <R> boolean needToWait(final QueryResult<R> queryResult) {
         return queryResult.isFailure()
-            && (
-            FailureReason.NOT_UP_TO_BOUND.equals(queryResult.getFailureReason())
-                || FailureReason.NOT_PRESENT.equals(queryResult.getFailureReason()));
+                && (
+                FailureReason.NOT_UP_TO_BOUND.equals(queryResult.getFailureReason())
+                        || FailureReason.NOT_PRESENT.equals(queryResult.getFailureReason()));
     }
 
     /*
@@ -304,8 +325,8 @@ public class IntegrationTestUtils {
     public static void quietlyCleanStateAfterTest(final EmbeddedKafkaCluster cluster, final KafkaStreams driver) {
         try {
             driver.cleanUp();
-            cluster.deleteAllTopicsAndWait(DEFAULT_TIMEOUT);
-        } catch (final RuntimeException | InterruptedException e) {
+//            cluster.deleteAllTopicsAndWait(DEFAULT_TIMEOUT);
+        } catch (final RuntimeException /*| InterruptedException */ e) {
             LOG.warn("Ignoring failure to clean test state", e);
         }
     }
@@ -326,13 +347,13 @@ public class IntegrationTestUtils {
     }
 
     /**
-     * @param topic               Kafka topic to write the data records to
-     * @param records             Data records to write to Kafka
-     * @param producerConfig      Kafka producer configuration
-     * @param headers             {@link Headers} of the data records
-     * @param time                Timestamp provider
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param topic          Kafka topic to write the data records to
+     * @param records        Data records to write to Kafka
+     * @param producerConfig Kafka producer configuration
+     * @param headers        {@link Headers} of the data records
+     * @param time           Timestamp provider
+     * @param <K>            Key type of the data records
+     * @param <V>            Value type of the data records
      */
     public static <K, V> void produceKeyValuesSynchronously(final String topic,
                                                             final Collection<KeyValue<K, V>> records,
@@ -343,13 +364,13 @@ public class IntegrationTestUtils {
     }
 
     /**
-     * @param topic               Kafka topic to write the data records to
-     * @param records             Data records to write to Kafka
-     * @param producerConfig      Kafka producer configuration
-     * @param time                Timestamp provider
-     * @param enableTransactions  Send messages in a transaction
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param topic              Kafka topic to write the data records to
+     * @param records            Data records to write to Kafka
+     * @param producerConfig     Kafka producer configuration
+     * @param time               Timestamp provider
+     * @param enableTransactions Send messages in a transaction
+     * @param <K>                Key type of the data records
+     * @param <V>                Value type of the data records
      */
     public static <K, V> void produceKeyValuesSynchronously(final String topic,
                                                             final Collection<KeyValue<K, V>> records,
@@ -360,14 +381,14 @@ public class IntegrationTestUtils {
     }
 
     /**
-     * @param topic               Kafka topic to write the data records to
-     * @param records             Data records to write to Kafka
-     * @param producerConfig      Kafka producer configuration
-     * @param headers             {@link Headers} of the data records
-     * @param time                Timestamp provider
-     * @param enableTransactions  Send messages in a transaction
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param topic              Kafka topic to write the data records to
+     * @param records            Data records to write to Kafka
+     * @param producerConfig     Kafka producer configuration
+     * @param headers            {@link Headers} of the data records
+     * @param time               Timestamp provider
+     * @param enableTransactions Send messages in a transaction
+     * @param <K>                Key type of the data records
+     * @param <V>                Value type of the data records
      */
     public static <K, V> void produceKeyValuesSynchronously(final String topic,
                                                             final Collection<KeyValue<K, V>> records,
@@ -393,12 +414,12 @@ public class IntegrationTestUtils {
     }
 
     /**
-     * @param topic               Kafka topic to write the data records to
-     * @param records             Data records to write to Kafka
-     * @param producerConfig      Kafka producer configuration
-     * @param timestamp           Timestamp of the record
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param topic          Kafka topic to write the data records to
+     * @param records        Data records to write to Kafka
+     * @param producerConfig Kafka producer configuration
+     * @param timestamp      Timestamp of the record
+     * @param <K>            Key type of the data records
+     * @param <V>            Value type of the data records
      */
     public static <K, V> void produceKeyValuesSynchronouslyWithTimestamp(final String topic,
                                                                          final Collection<KeyValue<K, V>> records,
@@ -408,13 +429,13 @@ public class IntegrationTestUtils {
     }
 
     /**
-     * @param topic               Kafka topic to write the data records to
-     * @param records             Data records to write to Kafka
-     * @param producerConfig      Kafka producer configuration
-     * @param timestamp           Timestamp of the record
-     * @param enableTransactions  Send messages in a transaction
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param topic              Kafka topic to write the data records to
+     * @param records            Data records to write to Kafka
+     * @param producerConfig     Kafka producer configuration
+     * @param timestamp          Timestamp of the record
+     * @param enableTransactions Send messages in a transaction
+     * @param <K>                Key type of the data records
+     * @param <V>                Value type of the data records
      */
     public static <K, V> void produceKeyValuesSynchronouslyWithTimestamp(final String topic,
                                                                          final Collection<KeyValue<K, V>> records,
@@ -425,14 +446,14 @@ public class IntegrationTestUtils {
     }
 
     /**
-     * @param topic               Kafka topic to write the data records to
-     * @param records             Data records to write to Kafka
-     * @param producerConfig      Kafka producer configuration
-     * @param headers             {@link Headers} of the data records
-     * @param timestamp           Timestamp of the record
-     * @param enableTransactions  Send messages in a transaction
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param topic              Kafka topic to write the data records to
+     * @param records            Data records to write to Kafka
+     * @param producerConfig     Kafka producer configuration
+     * @param headers            {@link Headers} of the data records
+     * @param timestamp          Timestamp of the record
+     * @param enableTransactions Send messages in a transaction
+     * @param <K>                Key type of the data records
+     * @param <V>                Value type of the data records
      */
     public static <K, V> void produceKeyValuesSynchronouslyWithTimestamp(final String topic,
                                                                          final Collection<KeyValue<K, V>> records,
@@ -467,14 +488,14 @@ public class IntegrationTestUtils {
             final LinkedList<Future<RecordMetadata>> futures = new LinkedList<>();
             for (final KeyValueTimestamp<K, V> record : toProduce) {
                 final Future<RecordMetadata> f = producer.send(
-                    new ProducerRecord<>(
-                        topic,
-                        partition.orElse(null),
-                        record.timestamp(),
-                        record.key(),
-                        record.value(),
-                        null
-                    )
+                        new ProducerRecord<>(
+                                topic,
+                                partition.orElse(null),
+                                record.timestamp(),
+                                record.key(),
+                                record.value(),
+                                null
+                        )
                 );
                 futures.add(f);
             }
@@ -499,12 +520,12 @@ public class IntegrationTestUtils {
      * Produce data records and send them synchronously in an aborted transaction; that is, a transaction is started for
      * each data record but not committed.
      *
-     * @param topic               Kafka topic to write the data records to
-     * @param records             Data records to write to Kafka
-     * @param producerConfig      Kafka producer configuration
-     * @param timestamp           Timestamp of the record
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param topic          Kafka topic to write the data records to
+     * @param records        Data records to write to Kafka
+     * @param producerConfig Kafka producer configuration
+     * @param timestamp      Timestamp of the record
+     * @param <K>            Key type of the data records
+     * @param <V>            Value type of the data records
      */
     public static <K, V> void produceAbortedKeyValuesSynchronouslyWithTimestamp(final String topic,
                                                                                 final Collection<KeyValue<K, V>> records,
@@ -523,11 +544,11 @@ public class IntegrationTestUtils {
     }
 
     /**
-     * @param topic               Kafka topic to write the data records to
-     * @param records             Data records to write to Kafka
-     * @param producerConfig      Kafka producer configuration
-     * @param time                Timestamp provider
-     * @param <V>                 Value type of the data records
+     * @param topic          Kafka topic to write the data records to
+     * @param records        Data records to write to Kafka
+     * @param producerConfig Kafka producer configuration
+     * @param time           Timestamp provider
+     * @param <V>            Value type of the data records
      */
     public static <V> void produceValuesSynchronously(final String topic,
                                                       final Collection<V> records,
@@ -537,12 +558,12 @@ public class IntegrationTestUtils {
     }
 
     /**
-     * @param topic               Kafka topic to write the data records to
-     * @param records             Data records to write to Kafka
-     * @param producerConfig      Kafka producer configuration
-     * @param time                Timestamp provider
-     * @param enableTransactions  Send messages in a transaction
-     * @param <V>                 Value type of the data records
+     * @param topic              Kafka topic to write the data records to
+     * @param records            Data records to write to Kafka
+     * @param producerConfig     Kafka producer configuration
+     * @param time               Timestamp provider
+     * @param enableTransactions Send messages in a transaction
+     * @param <V>                Value type of the data records
      */
     @SuppressWarnings("WeakerAccess")
     public static <V> void produceValuesSynchronously(final String topic,
@@ -565,8 +586,8 @@ public class IntegrationTestUtils {
      * Caveats:
      * - Inputs must be finite, fully loaded, and flushed before this method is called
      * - expectedPartitions is the total number of partitions to watch the lag on, including both input and internal.
-     *   It's somewhat ok to get this wrong, as the main failure case would be an immediate return due to the clients
-     *   not being initialized, which you can avoid with any non-zero value. But it's probably better to get it right ;)
+     * It's somewhat ok to get this wrong, as the main failure case would be an immediate return due to the clients
+     * not being initialized, which you can avoid with any non-zero value. But it's probably better to get it right ;)
      */
     public static void waitForCompletion(final KafkaStreams streams,
                                          final int expectedPartitions,
@@ -588,8 +609,8 @@ public class IntegrationTestUtils {
             }
             if (System.currentTimeMillis() - start >= timeoutMilliseconds) {
                 throw new RuntimeException(String.format(
-                    "Timed out waiting for completion. lagMetrics=[%s/%s] totalLag=[%s]",
-                    lagMetrics, expectedPartitions, totalLag
+                        "Timed out waiting for completion. lagMetrics=[%s/%s] totalLag=[%s]",
+                        lagMetrics, expectedPartitions, totalLag
                 ));
             }
         }
@@ -602,8 +623,8 @@ public class IntegrationTestUtils {
      * Caveats:
      * - Inputs must be finite, fully loaded, and flushed before this method is called
      * - expectedPartitions is the total number of partitions to watch the lag on, including both input and internal.
-     *   It's somewhat ok to get this wrong, as the main failure case would be an immediate return due to the clients
-     *   not being initialized, which you can avoid with any non-zero value. But it's probably better to get it right ;)
+     * It's somewhat ok to get this wrong, as the main failure case would be an immediate return due to the clients
+     * not being initialized, which you can avoid with any non-zero value. But it's probably better to get it right ;)
      */
     public static void waitForStandbyCompletion(final KafkaStreams streams,
                                                 final int expectedPartitions,
@@ -625,8 +646,8 @@ public class IntegrationTestUtils {
             }
             if (System.currentTimeMillis() - start >= timeoutMilliseconds) {
                 throw new RuntimeException(String.format(
-                    "Timed out waiting for completion. lagMetrics=[%s/%s] totalLag=[%s]",
-                    lagMetrics, expectedPartitions, totalLag
+                        "Timed out waiting for completion. lagMetrics=[%s/%s] totalLag=[%s]",
+                        lagMetrics, expectedPartitions, totalLag
                 ));
             }
         }
@@ -635,11 +656,11 @@ public class IntegrationTestUtils {
     /**
      * Wait until enough data (consumer records) has been consumed.
      *
-     * @param consumerConfig      Kafka Consumer configuration
-     * @param topic               Kafka topic to consume from
-     * @param expectedNumRecords  Minimum number of expected records
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param consumerConfig     Kafka Consumer configuration
+     * @param topic              Kafka topic to consume from
+     * @param expectedNumRecords Minimum number of expected records
+     * @param <K>                Key type of the data records
+     * @param <V>                Value type of the data records
      * @return All the records consumed, or null if no records are consumed
      */
     @SuppressWarnings("WeakerAccess")
@@ -652,12 +673,12 @@ public class IntegrationTestUtils {
     /**
      * Wait until enough data (consumer records) has been consumed.
      *
-     * @param consumerConfig      Kafka Consumer configuration
-     * @param topic               Kafka topic to consume from
-     * @param expectedNumRecords  Minimum number of expected records
-     * @param waitTime            Upper bound of waiting time in milliseconds
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param consumerConfig     Kafka Consumer configuration
+     * @param topic              Kafka topic to consume from
+     * @param expectedNumRecords Minimum number of expected records
+     * @param waitTime           Upper bound of waiting time in milliseconds
+     * @param <K>                Key type of the data records
+     * @param <V>                Value type of the data records
      * @return All the records consumed, or null if no records are consumed
      */
     @SuppressWarnings("WeakerAccess")
@@ -667,15 +688,15 @@ public class IntegrationTestUtils {
                                                                                 final long waitTime) throws Exception {
         final List<ConsumerRecord<K, V>> accumData = new ArrayList<>();
         final String reason = String.format(
-            "Did not receive all %d records from topic %s within %d ms",
-            expectedNumRecords,
-            topic,
-            waitTime
+                "Did not receive all %d records from topic %s within %d ms",
+                expectedNumRecords,
+                topic,
+                waitTime
         );
         try (final Consumer<K, V> consumer = createConsumer(consumerConfig)) {
             retryOnExceptionWithTimeout(waitTime, () -> {
                 final List<ConsumerRecord<K, V>> readData =
-                    readRecords(topic, consumer, waitTime, expectedNumRecords);
+                        readRecords(topic, consumer, waitTime, expectedNumRecords);
                 accumData.addAll(readData);
                 assertThat(reason, accumData.size(), is(greaterThanOrEqualTo(expectedNumRecords)));
             });
@@ -686,11 +707,11 @@ public class IntegrationTestUtils {
     /**
      * Wait until enough data (key-value records) has been consumed.
      *
-     * @param consumerConfig      Kafka Consumer configuration
-     * @param topic               Kafka topic to consume from
-     * @param expectedNumRecords  Minimum number of expected records
-     * @param <K>                 Key type of the data records
-     * @param <V>                 Value type of the data records
+     * @param consumerConfig     Kafka Consumer configuration
+     * @param topic              Kafka topic to consume from
+     * @param expectedNumRecords Minimum number of expected records
+     * @param <K>                Key type of the data records
+     * @param <V>                Value type of the data records
      * @return All the records consumed, or null if no records are consumed
      */
     public static <K, V> List<KeyValue<K, V>> waitUntilMinKeyValueRecordsReceived(final Properties consumerConfig,
@@ -709,7 +730,7 @@ public class IntegrationTestUtils {
      * @param <K>                Key type of the data records
      * @param <V>                Value type of the data records
      * @return All the records consumed, or null if no records are consumed
-     * @throws AssertionError    if the given wait time elapses
+     * @throws AssertionError if the given wait time elapses
      */
     public static <K, V> List<KeyValue<K, V>> waitUntilMinKeyValueRecordsReceived(final Properties consumerConfig,
                                                                                   final String topic,
@@ -717,15 +738,15 @@ public class IntegrationTestUtils {
                                                                                   final long waitTime) throws Exception {
         final List<KeyValue<K, V>> accumData = new ArrayList<>();
         final String reason = String.format(
-            "Did not receive all %d records from topic %s within %d ms",
-            expectedNumRecords,
-            topic,
-            waitTime
+                "Did not receive all %d records from topic %s within %d ms",
+                expectedNumRecords,
+                topic,
+                waitTime
         );
         try (final Consumer<K, V> consumer = createConsumer(consumerConfig)) {
             retryOnExceptionWithTimeout(waitTime, () -> {
                 final List<KeyValue<K, V>> readData =
-                    readKeyValues(topic, consumer, waitTime, expectedNumRecords);
+                        readKeyValues(topic, consumer, waitTime, expectedNumRecords);
                 accumData.addAll(readData);
                 assertThat(reason + ",  currently accumulated data is " + accumData, accumData.size(), is(greaterThanOrEqualTo(expectedNumRecords)));
             });
@@ -750,15 +771,15 @@ public class IntegrationTestUtils {
                                                                                                         final long waitTime) throws Exception {
         final List<KeyValueTimestamp<K, V>> accumData = new ArrayList<>();
         final String reason = String.format(
-            "Did not receive all %d records from topic %s within %d ms",
-            expectedNumRecords,
-            topic,
-            waitTime
+                "Did not receive all %d records from topic %s within %d ms",
+                expectedNumRecords,
+                topic,
+                waitTime
         );
         try (final Consumer<K, V> consumer = createConsumer(consumerConfig)) {
             retryOnExceptionWithTimeout(waitTime, () -> {
                 final List<KeyValueTimestamp<K, V>> readData =
-                    readKeyValuesWithTimestamp(topic, consumer, waitTime, expectedNumRecords);
+                        readKeyValuesWithTimestamp(topic, consumer, waitTime, expectedNumRecords);
                 accumData.addAll(readData);
                 assertThat(reason, accumData.size(), is(greaterThanOrEqualTo(expectedNumRecords)));
             });
@@ -769,11 +790,11 @@ public class IntegrationTestUtils {
     /**
      * Wait until final key-value mappings have been consumed.
      *
-     * @param consumerConfig     Kafka Consumer configuration
-     * @param topic              Kafka topic to consume from
-     * @param expectedRecords    Expected key-value mappings
-     * @param <K>                Key type of the data records
-     * @param <V>                Value type of the data records
+     * @param consumerConfig  Kafka Consumer configuration
+     * @param topic           Kafka topic to consume from
+     * @param expectedRecords Expected key-value mappings
+     * @param <K>             Key type of the data records
+     * @param <V>             Value type of the data records
      * @return All the mappings consumed, or null if no records are consumed
      */
     public static <K, V> List<KeyValue<K, V>> waitUntilFinalKeyValueRecordsReceived(final Properties consumerConfig,
@@ -785,11 +806,11 @@ public class IntegrationTestUtils {
     /**
      * Wait until final key-value mappings have been consumed.
      *
-     * @param consumerConfig     Kafka Consumer configuration
-     * @param topic              Kafka topic to consume from
-     * @param expectedRecords    Expected key-value mappings
-     * @param <K>                Key type of the data records
-     * @param <V>                Value type of the data records
+     * @param consumerConfig  Kafka Consumer configuration
+     * @param topic           Kafka topic to consume from
+     * @param expectedRecords Expected key-value mappings
+     * @param <K>             Key type of the data records
+     * @param <V>             Value type of the data records
      * @return All the mappings consumed, or null if no records are consumed
      */
     public static <K, V> List<KeyValueTimestamp<K, V>> waitUntilFinalKeyValueTimestampRecordsReceived(final Properties consumerConfig,
@@ -801,12 +822,12 @@ public class IntegrationTestUtils {
     /**
      * Wait until final key-value mappings have been consumed.
      *
-     * @param consumerConfig     Kafka Consumer configuration
-     * @param topic              Kafka topic to consume from
-     * @param expectedRecords    Expected key-value mappings
-     * @param waitTime           Upper bound of waiting time in milliseconds
-     * @param <K>                Key type of the data records
-     * @param <V>                Value type of the data records
+     * @param consumerConfig  Kafka Consumer configuration
+     * @param topic           Kafka topic to consume from
+     * @param expectedRecords Expected key-value mappings
+     * @param waitTime        Upper bound of waiting time in milliseconds
+     * @param <K>             Key type of the data records
+     * @param <V>             Value type of the data records
      * @return All the mappings consumed, or null if no records are consumed
      */
     @SuppressWarnings("WeakerAccess")
@@ -823,47 +844,107 @@ public class IntegrationTestUtils {
                                                                            final List<T> expectedRecords,
                                                                            final long waitTime,
                                                                            final boolean withTimestamp) throws Exception {
+        final Map<K, List<T>> finalExpected = new HashMap<>();
+        for (final T kv : expectedRecords) {
+            finalExpected.computeIfAbsent(
+                    withTimestamp ? ((KeyValueTimestamp<K, V>) kv).key() : ((KeyValue<K, V>) kv).key,
+                    key -> new ArrayList<>()).add(kv);
+        }
         final List<T> accumData = new ArrayList<>();
         try (final Consumer<K, V> consumer = createConsumer(consumerConfig)) {
-            final TestCondition valuesRead = () -> {
-                final List<T> readData;
-                if (withTimestamp) {
-                    readData = (List<T>) readKeyValuesWithTimestamp(topic, consumer, waitTime, expectedRecords.size());
-                } else {
-                    readData = (List<T>) readKeyValues(topic, consumer, waitTime, expectedRecords.size());
-                }
-                accumData.addAll(readData);
+            try (final AdminClient adminClient = KafkaAdminClient.create(consumerConfig)) {
+                final TestCondition valuesRead = () -> {
+                    final List<T> readData;
+                    if (withTimestamp) {
+                        readData = (List<T>) readKeyValuesWithTimestamp(topic, consumer, Math.max(500, waitTime / 10), expectedRecords.size());
+                    } else {
+                        readData = (List<T>) readKeyValues(topic, consumer, Math.max(500, waitTime / 10), expectedRecords.size());
+                    }
+                    accumData.addAll(readData);
 
-                // filter out all intermediate records we don't want
-                final List<T> accumulatedActual = accumData
-                    .stream()
-                    .filter(expectedRecords::contains)
-                    .collect(Collectors.toList());
+                    final Diffs<K, V> diffs = getDiffs(withTimestamp, finalExpected, accumData);
+                    final String consumerGroup = "app-KTableKTableForeignKeyJoinDistributedTestshouldBeInitializedWithDefaultSerde";
+                    final List<String> consumerGroups = adminClient.listConsumerGroups().all().get().stream().map(ConsumerGroupListing::groupId).collect(Collectors.toList());
+                    System.out.println("List of consumer groups: " + consumerGroups);
+                    final Map<TopicPartition, OffsetAndMetadata> consumerGroupOffsets =
+                            adminClient.listConsumerGroupOffsets(consumerGroup).partitionsToOffsetAndMetadata().get();
+                    final Map<TopicPartition, Long> endOffsets = consumer.endOffsets(consumerGroupOffsets.keySet());
+                    final Map<String, Long> offsetsByTopic = new HashMap<>();
+                    consumerGroupOffsets.keySet().forEach(tp ->
+                            offsetsByTopic.merge(tp.topic(), endOffsets.get(tp) - consumerGroupOffsets.get(tp).offset(), Long::sum)
+                    );
+                    System.out.println("App consumer group offsets (" + consumerGroup + "): " +
+                            offsetsByTopic.entrySet().stream().sorted(Entry.comparingByKey()).map(e -> "  " + (e.getKey().startsWith(consumerGroup) ? e.getKey().substring(consumerGroup.length() + 1) : e.getKey()) + ": " + e.getValue()).collect(Collectors.joining("\n", "\n", ""))
+                    );
+                    final Long totalOffset = offsetsByTopic.values().stream().reduce(0L, Long::sum);
+                    System.out.println("Waiting for condition... " + diffs.missingKeys.size() + " missing, " + diffs.unexpectedKeys.size() + " unexpected," + diffs.mismatchedValues.size() + " mismatched." +
+                            (diffs.missingKeys.isEmpty() ? "" : "\n  Missing (first 20): " + diffs.missingKeys.stream().sorted().limit(20).map(k -> k.toString()).collect(Collectors.joining(", "))) +
+                            (diffs.unexpectedKeys.isEmpty() ? "" : "\n  Unexpected (first 20): " + diffs.unexpectedKeys.stream().sorted().limit(20).map(k -> k.toString()).collect(Collectors.joining(", "))) +
+                            (diffs.mismatchedValues.isEmpty() ? "" : "\n  Mismatched values (first 20): " + diffs.mismatchedValues.stream().sorted().limit(20).map(k -> k.toString()).collect(Collectors.joining(", "))) +
+                            ""
+                    );
+                    // returns true only if the remaining records in both lists are the same and in the same order
+                    // and the last record received matches the last expected record
+//                return finalAccumData.equals(finalExpected);
+                    return totalOffset == 0L && diffs.isEmpty();
 
-                // still need to check that for each key, the ordering is expected
-                final Map<K, List<T>> finalAccumData = new HashMap<>();
-                for (final T kv : accumulatedActual) {
-                    finalAccumData.computeIfAbsent(
-                        withTimestamp ? ((KeyValueTimestamp<K, V>) kv).key() : ((KeyValue<K, V>) kv).key,
-                        key -> new ArrayList<>()).add(kv);
-                }
-                final Map<K, List<T>> finalExpected = new HashMap<>();
-                for (final T kv : expectedRecords) {
-                    finalExpected.computeIfAbsent(
-                        withTimestamp ? ((KeyValueTimestamp<K, V>) kv).key() : ((KeyValue<K, V>) kv).key,
-                        key -> new ArrayList<>()).add(kv);
-                }
-
-                // returns true only if the remaining records in both lists are the same and in the same order
-                // and the last record received matches the last expected record
-                return finalAccumData.equals(finalExpected);
-
-            };
-            final String conditionDetails = "Did not receive all " + expectedRecords + " records from topic " +
-                topic + " (got " + accumData + ")";
-            TestUtils.waitForCondition(valuesRead, waitTime, conditionDetails);
+                };
+                TestUtils.waitForCondition(
+                        valuesRead,
+                        waitTime,
+                        () -> {
+                            final Diffs<K, V> diffs = getDiffs(withTimestamp, finalExpected, accumData);
+                            return "Did not receive all " + expectedRecords.size() + " records from topic " + topic + " (got " + new HashSet<>(accumData).size() + ")" +
+                                    " Missing: " + diffs.missingKeys + " Unexpected: " + diffs.unexpectedKeys + " Mismatched: " + diffs.mismatchedValues;
+                        });
+            }
         }
         return accumData;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <K, V, T> Diffs<K, V> getDiffs(final boolean withTimestamp, final Map<K, List<T>> finalExpected, final List<T> accumData) {
+        // filter out all intermediate records we don't want
+//        final List<T> accumulatedActual = accumData
+//              .stream()
+//              .filter(expectedRecords::contains)
+//              .collect(Collectors.toList());
+
+        // still need to check that for each key, the ordering is expected
+        final Map<K, List<T>> finalAccumData = new HashMap<>();
+        for (final T kv : accumData) {
+            finalAccumData.computeIfAbsent(
+                    withTimestamp ? ((KeyValueTimestamp<K, V>) kv).key() : ((KeyValue<K, V>) kv).key,
+                    key -> new ArrayList<>()).add(kv);
+        }
+        final Set<K> missingKeys = new HashSet<>(finalExpected.keySet());
+        missingKeys.removeAll(finalAccumData.keySet());
+
+        final Set<K> unexpectedKeys = new HashSet<>(finalAccumData.keySet());
+        unexpectedKeys.removeAll(finalExpected.keySet());
+
+        final Set<K> mismatchedValues = new HashSet<>();
+        for (final K key : finalExpected.keySet()) {
+            if (!missingKeys.contains(key)) {
+                final List<T> finalExpectedValues = finalExpected.get(key);
+                final List<T> finalAccumValues = finalAccumData.getOrDefault(key, new ArrayList<>());
+                final T lastExpected = finalExpectedValues.get(finalExpectedValues.size() - 1);
+                final T lastAccum = finalAccumValues.size() > 0 ? finalAccumValues.get(finalAccumValues.size() - 1) : null;
+                if (!lastExpected.equals(lastAccum)) {
+                    mismatchedValues.add(key);
+                }
+            }
+        }
+
+        final int totalAccumData = finalAccumData.size();
+        System.out.println("Trying to get the expected " + finalExpected.size() +
+                " records (" + totalAccumData + " so far: " + missingKeys.size() + " missing, " +
+                unexpectedKeys.size() + " unexpected, " + mismatchedValues.size() + " mismatched)"
+        );
+
+
+        final Diffs<K, V> diffs = new Diffs<>(missingKeys, unexpectedKeys, mismatchedValues);
+        return diffs;
     }
 
     /**
@@ -873,7 +954,7 @@ public class IntegrationTestUtils {
      * @param topic              Topic to consume from
      * @param expectedNumRecords Minimum number of expected records
      * @return All the records consumed, or null if no records are consumed
-     * @throws AssertionError    if the given wait time elapses
+     * @throws AssertionError if the given wait time elapses
      */
     public static <V> List<V> waitUntilMinValuesRecordsReceived(final Properties consumerConfig,
                                                                 final String topic,
@@ -889,7 +970,7 @@ public class IntegrationTestUtils {
      * @param expectedNumRecords Minimum number of expected records
      * @param waitTime           Upper bound of waiting time in milliseconds
      * @return All the records consumed, or null if no records are consumed
-     * @throws AssertionError    if the given wait time elapses
+     * @throws AssertionError if the given wait time elapses
      */
     public static <V> List<V> waitUntilMinValuesRecordsReceived(final Properties consumerConfig,
                                                                 final String topic,
@@ -897,15 +978,15 @@ public class IntegrationTestUtils {
                                                                 final long waitTime) throws Exception {
         final List<V> accumData = new ArrayList<>();
         final String reason = String.format(
-            "Did not receive all %d records from topic %s within %d ms",
-            expectedNumRecords,
-            topic,
-            waitTime
+                "Did not receive all %d records from topic %s within %d ms",
+                expectedNumRecords,
+                topic,
+                waitTime
         );
         try (final Consumer<Object, V> consumer = createConsumer(consumerConfig)) {
             retryOnExceptionWithTimeout(waitTime, () -> {
                 final List<V> readData =
-                    readValues(topic, consumer, waitTime, expectedNumRecords);
+                        readValues(topic, consumer, waitTime, expectedNumRecords);
                 accumData.addAll(readData);
                 assertThat(reason, accumData.size(), is(greaterThanOrEqualTo(expectedNumRecords)));
             });
@@ -928,11 +1009,11 @@ public class IntegrationTestUtils {
     }
 
     private static void waitUntilMetadataIsPropagated(final List<KafkaServer> servers,
-                                                     final String topic,
-                                                     final int partition,
-                                                     final long timeout) throws InterruptedException {
+                                                      final String topic,
+                                                      final int partition,
+                                                      final long timeout) throws InterruptedException {
         final String baseReason = String.format("Metadata for topic=%s partition=%d was not propagated to all brokers within %d ms. ",
-            topic, partition, timeout);
+                topic, partition, timeout);
 
         retryOnExceptionWithTimeout(timeout, () -> {
             final List<KafkaServer> emptyPartitionInfos = new ArrayList<>();
@@ -941,7 +1022,7 @@ public class IntegrationTestUtils {
             for (final KafkaServer server : servers) {
                 final MetadataCache metadataCache = server.dataPlaneRequestProcessor().metadataCache();
                 final Option<UpdateMetadataPartitionState> partitionInfo =
-                    metadataCache.getPartitionInfo(topic, partition);
+                        metadataCache.getPartitionInfo(topic, partition);
 
                 if (partitionInfo.isEmpty()) {
                     emptyPartitionInfos.add(server);
@@ -955,7 +1036,7 @@ public class IntegrationTestUtils {
             }
 
             final String reason = baseReason + ". Brokers without partition info: " + emptyPartitionInfos +
-                ". Brokers with invalid broker id for partition leader: " + invalidBrokerIds;
+                    ". Brokers with invalid broker id for partition leader: " + invalidBrokerIds;
             assertThat(reason, emptyPartitionInfos.isEmpty() && invalidBrokerIds.isEmpty());
         });
     }
@@ -977,7 +1058,7 @@ public class IntegrationTestUtils {
      * to wait for instances to reach {@link State#RUNNING} state.
      *
      * @param streamsList the list of streams instances to run.
-     * @param timeout the time to wait for the streams to all be in {@link State#RUNNING} state.
+     * @param timeout     the time to wait for the streams to all be in {@link State#RUNNING} state.
      */
     public static void startApplicationAndWaitUntilRunning(final List<KafkaStreams> streamsList,
                                                            final Duration timeout) throws Exception {
@@ -1002,8 +1083,8 @@ public class IntegrationTestUtils {
             };
 
             streams.setStateListener(prevStateListener != null
-                ? new CompositeStateListener(prevStateListener, newStateListener)
-                : newStateListener);
+                    ? new CompositeStateListener(prevStateListener, newStateListener)
+                    : newStateListener);
         }
 
         for (final KafkaStreams streams : streamsList) {
@@ -1030,8 +1111,8 @@ public class IntegrationTestUtils {
                 final long millisRemaining = expectedEnd - System.currentTimeMillis();
                 if (millisRemaining <= 0) {
                     fail(
-                        "Application did not reach a RUNNING state for all streams instances. " +
-                            "Non-running instances: " + nonRunningStreams
+                            "Application did not reach a RUNNING state for all streams instances. " +
+                                    "Non-running instances: " + nonRunningStreams
                     );
                 }
 
@@ -1048,8 +1129,8 @@ public class IntegrationTestUtils {
      * because this method uses polling, which can be more error prone and slightly slower.
      *
      * @param streamsList the list of streams instances to run.
-     * @param state the expected state that all the streams to be in within timeout
-     * @param timeout the time to wait for the streams to all be in the specific state.
+     * @param state       the expected state that all the streams to be in within timeout
+     * @param timeout     the time to wait for the streams to all be in the specific state.
      *
      * @throws InterruptedException if the streams doesn't change to the expected state in time.
      */
@@ -1058,20 +1139,20 @@ public class IntegrationTestUtils {
                                                final Duration timeout) throws InterruptedException {
         retryOnExceptionWithTimeout(timeout.toMillis(), () -> {
             final Map<KafkaStreams, State> streamsToStates = streamsList
-                .stream()
-                .collect(Collectors.toMap(stream -> stream, KafkaStreams::state));
+                    .stream()
+                    .collect(Collectors.toMap(stream -> stream, KafkaStreams::state));
 
             final Map<KafkaStreams, State> wrongStateMap = streamsToStates.entrySet()
-                .stream()
-                .filter(entry -> entry.getValue() != state)
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                    .stream()
+                    .filter(entry -> entry.getValue() != state)
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
             final String reason = String.format(
-                "Expected all streams instances in %s to be %s within %d ms, but the following were not: %s",
-                streamsList,
-                state,
-                timeout.toMillis(),
-                wrongStateMap
+                    "Expected all streams instances in %s to be %s within %d ms, but the following were not: %s",
+                    streamsList,
+                    state,
+                    timeout.toMillis(),
+                    wrongStateMap
             );
             assertThat(reason, wrongStateMap.isEmpty());
         });
@@ -1097,9 +1178,9 @@ public class IntegrationTestUtils {
                                                  final String applicationId,
                                                  final long timeoutMs) throws Exception {
         TestUtils.waitForCondition(
-            new IntegrationTestUtils.ConsumerGroupInactiveCondition(adminClient, applicationId),
-            timeoutMs,
-            "Test consumer group " + applicationId + " still active even after waiting " + timeoutMs + " ms."
+                new IntegrationTestUtils.ConsumerGroupInactiveCondition(adminClient, applicationId),
+                timeoutMs,
+                "Test consumer group " + applicationId + " still active even after waiting " + timeoutMs + " ms."
         );
     }
 
@@ -1172,9 +1253,9 @@ public class IntegrationTestUtils {
         }
 
         final Set<KeyValueTimestamp<String, Long>> actual =
-            results.stream()
-                   .map(result -> new KeyValueTimestamp<>(result.key(), result.value(), result.timestamp()))
-                   .collect(Collectors.toSet());
+                results.stream()
+                        .map(result -> new KeyValueTimestamp<>(result.key(), result.value(), result.timestamp()))
+                        .collect(Collectors.toSet());
 
         assertThat(actual, equalTo(expected));
     }
@@ -1188,8 +1269,8 @@ public class IntegrationTestUtils {
         final V recordValue = record.value();
         final long recordTimestamp = record.timestamp();
         final AssertionError error = new AssertionError(
-            "Expected <" + expectedKey + ", " + expectedValue + "> with timestamp=" + expectedTimestamp +
-                " but was <" + recordKey + ", " + recordValue + "> with timestamp=" + recordTimestamp
+                "Expected <" + expectedKey + ", " + expectedValue + "> with timestamp=" + expectedTimestamp +
+                        " but was <" + recordKey + ", " + recordValue + "> with timestamp=" + recordTimestamp
         );
         if (recordKey != null) {
             if (!recordKey.equals(expectedKey)) {
@@ -1223,10 +1304,10 @@ public class IntegrationTestUtils {
     /**
      * Returns up to `maxMessages` message-values from the topic.
      *
-     * @param topic          Kafka topic to read messages from
-     * @param consumer       Kafka consumer
-     * @param waitTime       Maximum wait time in milliseconds
-     * @param maxMessages    Maximum number of messages to read via the consumer.
+     * @param topic       Kafka topic to read messages from
+     * @param consumer    Kafka consumer
+     * @param waitTime    Maximum wait time in milliseconds
+     * @param maxMessages Maximum number of messages to read via the consumer.
      * @return The values retrieved via the consumer.
      */
     private static <V> List<V> readValues(final String topic,
@@ -1245,10 +1326,10 @@ public class IntegrationTestUtils {
      * Returns up to `maxMessages` by reading via the provided consumer (the topic(s) to read from
      * are already configured in the consumer).
      *
-     * @param topic          Kafka topic to read messages from
-     * @param consumer       Kafka consumer
-     * @param waitTime       Maximum wait time in milliseconds
-     * @param maxMessages    Maximum number of messages to read via the consumer
+     * @param topic       Kafka topic to read messages from
+     * @param consumer    Kafka consumer
+     * @param waitTime    Maximum wait time in milliseconds
+     * @param maxMessages Maximum number of messages to read via the consumer
      * @return The KeyValue elements retrieved via the consumer
      */
     private static <K, V> List<KeyValue<K, V>> readKeyValues(final String topic,
@@ -1267,10 +1348,10 @@ public class IntegrationTestUtils {
      * Returns up to `maxMessages` by reading via the provided consumer (the topic(s) to read from
      * are already configured in the consumer).
      *
-     * @param topic          Kafka topic to read messages from
-     * @param consumer       Kafka consumer
-     * @param waitTime       Maximum wait time in milliseconds
-     * @param maxMessages    Maximum number of messages to read via the consumer
+     * @param topic       Kafka topic to read messages from
+     * @param consumer    Kafka consumer
+     * @param waitTime    Maximum wait time in milliseconds
+     * @param maxMessages Maximum number of messages to read via the consumer
      * @return The KeyValue elements retrieved via the consumer
      */
     private static <K, V> List<KeyValueTimestamp<K, V>> readKeyValuesWithTimestamp(final String topic,
@@ -1296,7 +1377,7 @@ public class IntegrationTestUtils {
         consumerRecords = new ArrayList<>();
         int totalPollTimeMs = 0;
         while (totalPollTimeMs < waitTime &&
-            continueConsuming(consumerRecords.size(), maxMessages)) {
+                continueConsuming(consumerRecords.size(), maxMessages)) {
             totalPollTimeMs += pollIntervalMs;
             final ConsumerRecords<K, V> records = consumer.poll(Duration.ofMillis(pollIntervalMs));
 
@@ -1385,8 +1466,8 @@ public class IntegrationTestUtils {
                                  final boolean enableStaleQuery,
                                  final QueryableStoreType<S> storeType) throws Exception {
         final StoreQueryParameters<S> param = enableStaleQuery ?
-            StoreQueryParameters.fromNameAndType(storeName, storeType).enableStaleStores() :
-            StoreQueryParameters.fromNameAndType(storeName, storeType);
+                StoreQueryParameters.fromNameAndType(storeName, storeType).enableStaleStores() :
+                StoreQueryParameters.fromNameAndType(storeName, storeType);
         return getStore(waitTime, streams, param);
     }
 
@@ -1419,9 +1500,9 @@ public class IntegrationTestUtils {
         long sum = 0;
         try (final Consumer<Object, Object> consumer = createConsumer(consumerConfig)) {
             final Collection<TopicPartition> partitions = consumer.partitionsFor(topicName)
-                .stream()
-                .map(info -> new TopicPartition(topicName, info.partition()))
-                .collect(Collectors.toList());
+                    .stream()
+                    .map(info -> new TopicPartition(topicName, info.partition()))
+                    .collect(Collectors.toList());
             final Map<TopicPartition, Long> beginningOffsets = consumer.beginningOffsets(partitions);
             final Map<TopicPartition, Long> endOffsets = consumer.endOffsets(partitions);
 
@@ -1434,16 +1515,16 @@ public class IntegrationTestUtils {
 
     private static Double getStreamsPollNumber(final KafkaStreams kafkaStreams) {
         return (Double) kafkaStreams.metrics()
-            .entrySet()
-            .stream()
-            .filter(entry -> entry.getKey().name().equals("poll-total"))
-            .findFirst().get()
-            .getValue()
-            .metricValue();
+                .entrySet()
+                .stream()
+                .filter(entry -> entry.getKey().name().equals("poll-total"))
+                .findFirst().get()
+                .getValue()
+                .metricValue();
     }
 
     public static void waitUntilStreamsHasPolled(final KafkaStreams kafkaStreams, final int pollNumber)
-        throws InterruptedException {
+            throws InterruptedException {
         final Double initialCount = getStreamsPollNumber(kafkaStreams);
         retryOnExceptionWithTimeout(1000, () -> {
             assertThat(getStreamsPollNumber(kafkaStreams), is(greaterThanOrEqualTo(initialCount + pollNumber)));
@@ -1480,10 +1561,10 @@ public class IntegrationTestUtils {
          */
         public void waitForNextStableAssignment(final long maxWaitMs) throws InterruptedException {
             waitForCondition(
-                () -> numStableAssignments() >= nextExpectedNumStableAssignments,
-                maxWaitMs,
-                () -> "Client did not reach " + nextExpectedNumStableAssignments + " stable assignments on time, " +
-                    "numStableAssignments was " + numStableAssignments()
+                    () -> numStableAssignments() >= nextExpectedNumStableAssignments,
+                    maxWaitMs,
+                    () -> "Client did not reach " + nextExpectedNumStableAssignments + " stable assignments on time, " +
+                            "numStableAssignments was " + numStableAssignments()
             );
         }
     }

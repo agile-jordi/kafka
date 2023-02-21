@@ -1953,7 +1953,8 @@ project(':streams') {
     testImplementation libs.bcpkix
     testImplementation libs.hamcrest
     testImplementation libs.mockitoInline // supports mocking static methods, final classes, etc.
-
+    testImplementation libs.testContainers
+    testImplementation libs.testContainersKafka
     testRuntimeOnly project(':streams:test-utils')
     testRuntimeOnly libs.slf4jlog4j
 

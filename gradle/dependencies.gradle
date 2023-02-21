@@ -126,7 +126,8 @@ versions += [
   swaggerJaxrs2: "2.2.0",
   zinc: "1.7.2",
   zookeeper: "3.6.3",
-  zstd: "1.5.2-1"
+  zstd: "1.5.2-1",
+  testContainers: "1.17.6"
 ]
 libs += [
   activation: "javax.activation:activation:$versions.activation",
@@ -195,6 +196,8 @@ libs += [
   dropwizardMetrics: "io.dropwizard.metrics:metrics-core:$versions.dropwizardMetrics",
   mockitoCore: "org.mockito:mockito-core:$versions.mockito",
   mockitoInline: "org.mockito:mockito-inline:$versions.mockito",
+  testContainers: "org.testcontainers:testcontainers:$versions.testContainers",
+  testContainersKafka: "org.testcontainers:kafka:$versions.testContainers",
   mockitoJunitJupiter: "org.mockito:mockito-junit-jupiter:$versions.mockito",
   nettyHandler: "io.netty:netty-handler:$versions.netty",
   nettyTransportNativeEpoll: "io.netty:netty-transport-native-epoll:$versions.netty",
