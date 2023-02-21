@@ -800,7 +800,7 @@ public class IntegrationTestUtils {
     public static <K, V> List<KeyValue<K, V>> waitUntilFinalKeyValueRecordsReceived(final Properties consumerConfig,
                                                                                     final String topic,
                                                                                     final List<KeyValue<K, V>> expectedRecords) throws Exception {
-        return waitUntilFinalKeyValueRecordsReceived(consumerConfig, topic, expectedRecords, DEFAULT_TIMEOUT);
+        return waitUntilFinalKeyValueRecordsReceived(consumerConfig, null, topic, expectedRecords, DEFAULT_TIMEOUT);
     }
 
     /**
@@ -816,7 +816,7 @@ public class IntegrationTestUtils {
     public static <K, V> List<KeyValueTimestamp<K, V>> waitUntilFinalKeyValueTimestampRecordsReceived(final Properties consumerConfig,
                                                                                                       final String topic,
                                                                                                       final List<KeyValueTimestamp<K, V>> expectedRecords) throws Exception {
-        return waitUntilFinalKeyValueRecordsReceived(consumerConfig, topic, expectedRecords, DEFAULT_TIMEOUT, true);
+        return waitUntilFinalKeyValueRecordsReceived(consumerConfig, null, topic, expectedRecords, DEFAULT_TIMEOUT, true);
     }
 
     /**
@@ -832,14 +832,16 @@ public class IntegrationTestUtils {
      */
     @SuppressWarnings("WeakerAccess")
     public static <K, V> List<KeyValue<K, V>> waitUntilFinalKeyValueRecordsReceived(final Properties consumerConfig,
+                                                                                    final String appId,
                                                                                     final String topic,
                                                                                     final List<KeyValue<K, V>> expectedRecords,
                                                                                     final long waitTime) throws Exception {
-        return waitUntilFinalKeyValueRecordsReceived(consumerConfig, topic, expectedRecords, waitTime, false);
+        return waitUntilFinalKeyValueRecordsReceived(consumerConfig, appId, topic, expectedRecords, waitTime, false);
     }
 
     @SuppressWarnings("unchecked")
     private static <K, V, T> List<T> waitUntilFinalKeyValueRecordsReceived(final Properties consumerConfig,
+                                                                           final String appId,
                                                                            final String topic,
                                                                            final List<T> expectedRecords,
                                                                            final long waitTime,
@@ -863,18 +865,16 @@ public class IntegrationTestUtils {
                     accumData.addAll(readData);
 
                     final Diffs<K, V> diffs = getDiffs(withTimestamp, finalExpected, accumData);
-                    final String consumerGroup = "app-KTableKTableForeignKeyJoinDistributedTestshouldBeInitializedWithDefaultSerde";
-                    final List<String> consumerGroups = adminClient.listConsumerGroups().all().get().stream().map(ConsumerGroupListing::groupId).collect(Collectors.toList());
-                    System.out.println("List of consumer groups: " + consumerGroups);
+                    System.out.println("All consumer groups: " + adminClient.listConsumerGroups().all().get());
                     final Map<TopicPartition, OffsetAndMetadata> consumerGroupOffsets =
-                            adminClient.listConsumerGroupOffsets(consumerGroup).partitionsToOffsetAndMetadata().get();
+                            adminClient.listConsumerGroupOffsets(appId).partitionsToOffsetAndMetadata().get();
                     final Map<TopicPartition, Long> endOffsets = consumer.endOffsets(consumerGroupOffsets.keySet());
                     final Map<String, Long> offsetsByTopic = new HashMap<>();
                     consumerGroupOffsets.keySet().forEach(tp ->
                             offsetsByTopic.merge(tp.topic(), endOffsets.get(tp) - consumerGroupOffsets.get(tp).offset(), Long::sum)
                     );
-                    System.out.println("App consumer group offsets (" + consumerGroup + "): " +
-                            offsetsByTopic.entrySet().stream().sorted(Entry.comparingByKey()).map(e -> "  " + (e.getKey().startsWith(consumerGroup) ? e.getKey().substring(consumerGroup.length() + 1) : e.getKey()) + ": " + e.getValue()).collect(Collectors.joining("\n", "\n", ""))
+                    System.out.println("App consumer group offsets (" + appId + "): " +
+                            offsetsByTopic.entrySet().stream().sorted(Entry.comparingByKey()).map(e -> "  " + (e.getKey().startsWith(appId) ? e.getKey().substring(appId.length() + 1) : e.getKey()) + ": " + e.getValue()).collect(Collectors.joining("\n", "\n", ""))
                     );
                     final Long totalLag = offsetsByTopic.values().stream().reduce(0L, Long::sum) + (4 - offsetsByTopic.size()) * 1000000;
 

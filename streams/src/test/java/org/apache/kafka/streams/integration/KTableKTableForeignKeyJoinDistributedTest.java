@@ -46,7 +46,7 @@ import org.apache.kafka.test.TestUtils;
 import org.junit.experimental.categories.Category;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.Timeout;
 import org.testcontainers.containers.KafkaContainer;
@@ -234,10 +234,12 @@ public class KTableKTableForeignKeyJoinDistributedTest {
                 .to(OUTPUT, Produced.with(Serdes.String(), Serdes.String()));
     }
 
-    @Test
+    @RepeatedTest(10)
     public void shouldBeInitializedWithDefaultSerde(final TestInfo testInfo) throws Exception {
         final Properties streamsConfiguration1 = getStreamsConfiguration(testInfo);
         final Properties streamsConfiguration2 = getStreamsConfiguration(testInfo);
+
+        final String appId = streamsConfiguration1.getProperty(StreamsConfig.APPLICATION_ID_CONFIG);
 
         //Each streams client needs to have it's own StreamsBuilder in order to simulate
         //a truly distributed run
@@ -263,7 +265,7 @@ public class KTableKTableForeignKeyJoinDistributedTest {
 //        );
 
         IntegrationTestUtils
-                .waitUntilFinalKeyValueRecordsReceived(CONSUMER_CONFIG, OUTPUT, new ArrayList<>(expectedResult), 3 * 60 * 1000);
+                .waitUntilFinalKeyValueRecordsReceived(CONSUMER_CONFIG, appId, OUTPUT, new ArrayList<>(expectedResult), 3 * 60 * 1000);
 
         //Check that both clients are still running
 //        waitUntilBothClientAreOK("At least one client did not reach state RUNNING with active tasks");
