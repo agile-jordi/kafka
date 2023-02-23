@@ -59,6 +59,7 @@ import org.apache.kafka.streams.query.QueryResult;
 import org.apache.kafka.streams.query.StateQueryRequest;
 import org.apache.kafka.streams.query.StateQueryResult;
 import org.apache.kafka.streams.state.QueryableStoreType;
+import org.apache.kafka.test.NoRetryException;
 import org.apache.kafka.test.TestCondition;
 import org.apache.kafka.test.TestUtils;
 import org.junit.jupiter.api.TestInfo;
@@ -864,17 +865,7 @@ public class IntegrationTestUtils {
                     accumData.addAll(readData);
 
                     final Diffs<K, V> diffs = getDiffs(withTimestamp, finalExpected, accumData);
-                    System.out.println("All consumer groups: " + adminClient.listConsumerGroups().all().get());
-                    final Map<TopicPartition, OffsetAndMetadata> consumerGroupOffsets =
-                            adminClient.listConsumerGroupOffsets(appId).partitionsToOffsetAndMetadata().get();
-                    final Map<TopicPartition, Long> endOffsets = consumer.endOffsets(consumerGroupOffsets.keySet());
-                    final Map<String, Long> offsetsByTopic = new HashMap<>();
-                    consumerGroupOffsets.keySet().forEach(tp ->
-                            offsetsByTopic.merge(tp.topic(), endOffsets.get(tp) - consumerGroupOffsets.get(tp).offset(), Long::sum)
-                    );
-                    System.out.println("App consumer group offsets (" + appId + "): " +
-                            offsetsByTopic.entrySet().stream().sorted(Entry.comparingByKey()).map(e -> "  " + (e.getKey().startsWith(appId) ? e.getKey().substring(appId.length() + 1) : e.getKey()) + ": " + e.getValue()).collect(Collectors.joining("\n", "\n", ""))
-                    );
+                    final Map<String, Long> offsetsByTopic = getOffsetsByTopic(appId, consumer, adminClient);
                     final Long totalLag = offsetsByTopic.values().stream().reduce(0L, Long::sum) + (4 - offsetsByTopic.size()) * 1000000;
 
                     System.out.println("Waiting for condition... " + totalLag + " lag, " + diffs.missingKeys.size() + " missing, " + diffs.unexpectedKeys.size() + " unexpected, " + diffs.mismatchedValues.size() + " mismatched." +
@@ -884,6 +875,10 @@ public class IntegrationTestUtils {
                             (totalLag > 0 ? "\n  Offset: " + offsetsByTopic.entrySet().stream().sorted(Entry.comparingByKey()).filter(e -> e.getValue() > 0).map(e -> e.getKey() + ": " + e.getValue()).collect(Collectors.joining(", ")) : "") +
                             ""
                     );
+
+                    if (totalLag == 0L && !diffs.isEmpty()) {
+                        throw new NoRetryException(new AssertionError("Lag 0 but there are missing keys: " + diffs.missingKeys));
+                    }
                     // returns true only if the remaining records in both lists are the same and in the same order
                     // and the last record received matches the last expected record
 //                return finalAccumData.equals(finalExpected);
@@ -901,6 +896,21 @@ public class IntegrationTestUtils {
             }
         }
         return accumData;
+    }
+
+    private static <K, V> Map<String, Long> getOffsetsByTopic(final String appId, final Consumer<K, V> consumer, final AdminClient adminClient) throws InterruptedException, ExecutionException {
+        System.out.println("All consumer groups: " + adminClient.listConsumerGroups().all().get());
+        final Map<TopicPartition, OffsetAndMetadata> consumerGroupOffsets =
+                adminClient.listConsumerGroupOffsets(appId).partitionsToOffsetAndMetadata().get();
+        final Map<TopicPartition, Long> endOffsets = consumer.endOffsets(consumerGroupOffsets.keySet());
+        final Map<String, Long> offsetsByTopic = new HashMap<>();
+        consumerGroupOffsets.keySet().forEach(tp ->
+                offsetsByTopic.merge(tp.topic(), endOffsets.get(tp) - consumerGroupOffsets.get(tp).offset(), Long::sum)
+        );
+        System.out.println("App consumer group offsets (" + appId + "): " +
+                offsetsByTopic.entrySet().stream().sorted(Entry.comparingByKey()).map(e -> "  " + (e.getKey().startsWith(appId) ? e.getKey().substring(appId.length() + 1) : e.getKey()) + ": " + e.getValue()).collect(Collectors.joining("\n", "\n", ""))
+        );
+        return offsetsByTopic;
     }
 
     @SuppressWarnings("unchecked")

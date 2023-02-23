@@ -33,7 +33,6 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.ThreadMetadata;
 import org.apache.kafka.streams.Topology;
-import org.apache.kafka.streams.errors.DefaultProductionExceptionHandler;
 import org.apache.kafka.streams.integration.utils.IntegrationTestUtils;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KTable;
@@ -72,11 +71,9 @@ public class KTableKTableForeignKeyJoinDistributedTest {
         final List<KeyValue<String, String>> combinations = new ArrayList<>();
         for (char c1 = 'a'; c1 <= 'z'; c1++) {
             for (char c2 = 'a'; c2 <= 'z'; c2++) {
-                for (char c3 = 'a'; c3 <= 'a'; c3++) {
-                    for (int d = 1; d <= 5; d++) {
-                        final String letters = "" + c1 + c2 + c3;
-                        combinations.add(new KeyValue<>(letters + d, letters + "|rhs" + d));
-                    }
+                for (int d = 1; d <= 5; d++) {
+                    final String letters = "" + c1 + c2;
+                    combinations.add(new KeyValue<>(letters + d, letters + "|rhs" + d));
                 }
             }
         }
@@ -173,25 +170,13 @@ public class KTableKTableForeignKeyJoinDistributedTest {
         streamsConfiguration.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
         streamsConfiguration.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 50);
         streamsConfiguration.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, 700);
-        streamsConfiguration.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, 1048576);
-//        streamsConfiguration.put(
-//                StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG,
-//                LogAndContinueExceptionHandler.class.getCanonicalName()
-//        );
-        streamsConfiguration.put(
-                StreamsConfig.DEFAULT_PRODUCTION_EXCEPTION_HANDLER_CLASS_CONFIG,
-                DefaultProductionExceptionHandler.class.getCanonicalName()
-        );
         streamsConfiguration.put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, "10");
         streamsConfiguration.put(ConsumerConfig.ALLOW_AUTO_CREATE_TOPICS_CONFIG, "true");
         streamsConfiguration.put(StreamsConfig.REPLICATION_FACTOR_CONFIG, "1");
-//        streamsConfiguration.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, StreamsConfig.AT_LEAST_ONCE);
-        streamsConfiguration.put(StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG, 0);
-        streamsConfiguration.put(StreamsConfig.MAX_WARMUP_REPLICAS_CONFIG, 1);
+//        streamsConfiguration.put(StreamsConfig.NUM_STANDBY_REPLICAS_CONFIG, 0);
+//        streamsConfiguration.put(StreamsConfig.MAX_WARMUP_REPLICAS_CONFIG, 1);
         streamsConfiguration.put(StreamsConfig.COMMIT_INTERVAL_MS_CONFIG, 1_000);
-        streamsConfiguration.put(StreamsConfig.restoreConsumerPrefix(ConsumerConfig.MAX_POLL_RECORDS_CONFIG), 20000);
-//        streamsConfiguration.put(StreamsConfig.STATE_CLEANUP_DELAY_MS_CONFIG, 3_600_000);
-//        streamsConfiguration.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30_000);
+//        streamsConfiguration.put(StreamsConfig.restoreConsumerPrefix(ConsumerConfig.MAX_POLL_RECORDS_CONFIG), 20000);
         streamsConfiguration.put(StreamsConfig.producerPrefix(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG), 1_000);
         streamsConfiguration.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 999);
         return streamsConfiguration;
